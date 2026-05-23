@@ -32,9 +32,9 @@ def load_env():
 load_env()
 
 PORT = int(ENV.get("PORT") or os.environ.get("PORT") or "3000")
-STRAVA_CLIENT_ID = ENV.get("STRAVA_CLIENT_ID") or "249518"
-STRAVA_CLIENT_SECRET = ENV.get("STRAVA_CLIENT_SECRET")
-STRAVA_REDIRECT_URI = ENV.get("STRAVA_REDIRECT_URI") or f"http://localhost:{PORT}/api/strava/callback"
+STRAVA_CLIENT_ID = os.environ.get("STRAVA_CLIENT_ID") or ENV.get("STRAVA_CLIENT_ID") or "249518"
+STRAVA_CLIENT_SECRET = os.environ.get("STRAVA_CLIENT_SECRET") or ENV.get("STRAVA_CLIENT_SECRET")
+STRAVA_REDIRECT_URI = os.environ.get("STRAVA_REDIRECT_URI") or ENV.get("STRAVA_REDIRECT_URI") or f"http://localhost:{PORT}/api/strava/callback"
 
 
 class Handler(BaseHTTPRequestHandler):
