@@ -1,6 +1,7 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
+import base64
 import html
 import json
 import os
@@ -42,7 +43,7 @@ class Handler(BaseHTTPRequestHandler):
         self.session_id = get_cookie(self, "runtou_session")
         try:
             if parsed.path == "/":
-                return self.send_html(render_page(connected=bool(get_session_token(self.session_id)), language=detect_language(self.headers.get("Accept-Language"))))
+                return self.send_html(render_page(connected=bool(get_request_token(self)), language=detect_language(self.headers.get("Accept-Language"))))
             if parsed.path == "/api/strava/login":
                 self.session_id = self.session_id or create_session_id()
                 return self.redirect(build_authorize_url(self.session_id, request_redirect_uri(self)), session_id=self.session_id)
@@ -85,12 +86,12 @@ class Handler(BaseHTTPRequestHandler):
         )
         save_session_token(session_id, TOKEN_SET)
         clear_activity_cache(session_id)
-        return self.redirect("/", session_id=session_id)
+        return self.redirect("/", session_id=session_id, token=TOKEN_SET)
 
     def handle_activities(self, parsed):
         global TOKEN_SET
         session_id = self.session_id
-        TOKEN_SET = get_session_token(session_id)
+        TOKEN_SET = get_request_token(self)
         if not TOKEN_SET or not TOKEN_SET.get("access_token"):
             return self.send_json(401, {"error": "Conecte sua conta Strava primeiro."})
 
@@ -99,9 +100,9 @@ class Handler(BaseHTTPRequestHandler):
         month = first(query.get("month"))
         force_refresh = first(query.get("refresh")) in {"1", "true", "yes"}
 
-        refresh_token_if_needed(session_id)
+        token_refreshed = refresh_token_if_needed(session_id)
         data = fetch_activities_for_period(session_id, year, month, force_refresh=force_refresh)
-        return self.send_json(200, [format_activity(activity) for activity in data])
+        return self.send_json(200, [format_activity(activity) for activity in data], token=TOKEN_SET if token_refreshed else None)
 
     def send_html(self, body):
         encoded = body.encode("utf-8")
@@ -111,11 +112,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
-    def send_json(self, status, data):
+    def send_json(self, status, data, token=None):
         encoded = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(encoded)))
+        if token:
+            self.send_header("Set-Cookie", token_cookie(token))
         self.end_headers()
         self.wfile.write(encoded)
 
@@ -129,11 +132,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def redirect(self, location, session_id=None):
+    def redirect(self, location, session_id=None, token=None):
         self.send_response(302)
         self.send_header("Location", location)
         if session_id:
             self.send_header("Set-Cookie", session_cookie(session_id))
+        if token:
+            self.send_header("Set-Cookie", token_cookie(token))
         self.end_headers()
 
     def log_message(self, format, *args):
@@ -189,6 +194,36 @@ def get_cookie(handler, name):
 def session_cookie(session_id):
     max_age = 60 * 60 * 24 * 180
     return f"runtou_session={session_id}; Max-Age={max_age}; Path=/; HttpOnly; SameSite=Lax"
+
+
+def token_cookie(token):
+    max_age = 60 * 60 * 24 * 180
+    payload = {
+        "access_token": token.get("access_token"),
+        "refresh_token": token.get("refresh_token"),
+        "expires_at": token.get("expires_at"),
+        "athlete": {"id": (token.get("athlete") or {}).get("id")},
+    }
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    value = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    return f"runtou_token={value}; Max-Age={max_age}; Path=/; HttpOnly; SameSite=Lax"
+
+
+def decode_token_cookie(value):
+    if not value:
+        return None
+    try:
+        padded = value + "=" * (-len(value) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except (ValueError, json.JSONDecodeError):
+        return None
+
+
+def get_request_token(handler):
+    session_token = get_session_token(getattr(handler, "session_id", None))
+    if session_token:
+        return session_token
+    return decode_token_cookie(get_cookie(handler, "runtou_token"))
 
 
 def get_session_token(session_id):
@@ -274,7 +309,7 @@ def refresh_token_if_needed(session_id):
     global TOKEN_SET
     expires_at = int(TOKEN_SET.get("expires_at") or 0)
     if time.time() < expires_at - 60:
-        return
+        return False
     TOKEN_SET.update(
         post_json(
             "https://www.strava.com/oauth/token",
@@ -287,6 +322,7 @@ def refresh_token_if_needed(session_id):
         )
     )
     save_session_token(session_id, TOKEN_SET)
+    return True
 
 
 def fetch_activities_for_period(session_id, year=None, month=None, force_refresh=False):
