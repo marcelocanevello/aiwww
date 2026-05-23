@@ -150,12 +150,12 @@ class Handler(BaseHTTPRequestHandler):
 def detect_language(value):
     supported = {"pt", "en", "es", "fr", "de"}
     if not value:
-        return "pt"
+        return "en"
     for item in value.split(","):
         code = item.strip().split(";")[0].split("-")[0].lower()
         if code in supported:
             return code
-    return "pt"
+    return "en"
 
 def load_store():
     if not DB_PATH.exists():
@@ -613,7 +613,7 @@ def render_page(message="", connected=False, language="pt"):
     }};
     function normalizeLanguage(value) {{
       const code = String(value || "").toLowerCase().split("-")[0];
-      return translations[code] ? code : "pt";
+      return translations[code] ? code : "en";
     }}
     const appLanguage = normalizeLanguage(navigator.language || initialLanguage);
     const i18n = translations[appLanguage];
