@@ -1,0 +1,7 @@
+.env
+node_modules/
+__pycache__/
+*.pyc
+
+runtou-store.json
+runtou-store.tmp
