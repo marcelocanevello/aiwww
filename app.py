@@ -279,16 +279,12 @@ def clear_activity_cache(session_id):
     save_store(store)
 
 def request_redirect_uri(handler):
-    configured = STRAVA_REDIRECT_URI
-    if configured and "localhost" not in configured:
-        return configured
-
     host = handler.headers.get("X-Forwarded-Host") or handler.headers.get("Host")
     if host:
         proto = handler.headers.get("X-Forwarded-Proto") or ("http" if host.startswith("localhost") else "https")
         return f"{proto}://{host}/api/strava/callback"
 
-    return configured or f"http://localhost:{PORT}/api/strava/callback"
+    return STRAVA_REDIRECT_URI or f"http://localhost:{PORT}/api/strava/callback"
 
 
 def build_authorize_url(session_id, redirect_uri=None):
